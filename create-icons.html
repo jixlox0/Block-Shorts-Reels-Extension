@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Icon Generator</title>
+  </head>
+  <body>
+    <h1>Icon Generator for Chrome Extension</h1>
+    <p>
+      This page helps you create icons for the extension. Open the browser
+      console and run the JavaScript code below, or use an online tool to create
+      icons.
+    </p>
+
+    <canvas
+      id="iconCanvas"
+      width="128"
+      height="128"
+      style="border: 1px solid #ccc; margin: 20px"
+    ></canvas>
+
+    <script>
+      // Simple icon generator - creates a red circle with a slash
+      const canvas = document.getElementById("iconCanvas");
+      const ctx = canvas.getContext("2d");
+
+      // Draw background
+      ctx.fillStyle = "#FF0000";
+      ctx.beginPath();
+      ctx.arc(64, 64, 60, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Draw white slash
+      ctx.strokeStyle = "#FFFFFF";
+      ctx.lineWidth = 12;
+      ctx.beginPath();
+      ctx.moveTo(30, 30);
+      ctx.lineTo(98, 98);
+      ctx.stroke();
+
+      // Download function
+      function downloadIcon(size) {
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = size;
+        tempCanvas.height = size;
+        const tempCtx = tempCanvas.getContext("2d");
+        tempCtx.drawImage(canvas, 0, 0, size, size);
+
+        tempCanvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `icon${size}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+        });
+      }
+
+      // Add download buttons
+      [16, 48, 128].forEach((size) => {
+        const btn = document.createElement("button");
+        btn.textContent = `Download ${size}x${size}`;
+        btn.onclick = () => {
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = size;
+          tempCanvas.height = size;
+          const tempCtx = tempCanvas.getContext("2d");
+          tempCtx.drawImage(canvas, 0, 0, size, size);
+
+          tempCanvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `icon${size}.png`;
+            a.click();
+            URL.revokeObjectURL(url);
+          });
+        };
+        document.body.appendChild(btn);
+        document.body.appendChild(document.createElement("br"));
+      });
+    </script>
+
+    <p>
+      <strong>Note:</strong> For production, you may want to create more
+      polished icons using design tools like Figma, Canva, or Photoshop.
+    </p>
+  </body>
+</html>
