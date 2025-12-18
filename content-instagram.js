@@ -43,6 +43,18 @@
 
   // Function to hide/show Reels navigation button
   function updateReelsButtonVisibility() {
+    // Don't hide reels button on home page - allow reels to work normally
+    if (isHomePage()) {
+      // Restore any hidden elements on home page
+      document
+        .querySelectorAll('[data-blocker-hidden="true"]')
+        .forEach((element) => {
+          element.style.display = "";
+          element.removeAttribute("data-blocker-hidden");
+        });
+      return;
+    }
+
     // Multiple selectors for Instagram Reels button
     const reelsSelectors = [
       'a[href*="/reels"]',
@@ -252,6 +264,25 @@
       return;
     }
 
+    // Don't block reels on home page - allow them to work normally
+    if (isHomePage()) {
+      // Restore any blocked reels on home page
+      document
+        .querySelectorAll('[data-reel-blocked="true"]')
+        .forEach((blockedElement) => {
+          if (blockedElement.dataset.originalContent) {
+            try {
+              blockedElement.innerHTML = blockedElement.dataset.originalContent;
+              blockedElement.removeAttribute("data-reel-blocked");
+              blockedElement.removeAttribute("data-original-content");
+            } catch (e) {
+              console.error("Error restoring reel content:", e);
+            }
+          }
+        });
+      return;
+    }
+
     // Don't show blocked cards on Profile pages (but allow on Explore page)
     if (isProfilePage()) {
       return;
@@ -352,26 +383,31 @@
     );
     const processedContainers = new Set();
 
-    // Check if we're on Explore page
+    // Check if we're on Explore page or home page
     const currentUrl = window.location.href;
     const pathname = window.location.pathname;
     const isExplorePage =
       pathname === "/explore/" ||
       pathname === "/explore" ||
       currentUrl.includes("/explore/");
+    const isHomePageFeed = isHomePage();
 
     allElements.forEach((element) => {
       // Skip if already blocked or processed
       if (element.closest('[data-reel-blocked="true"]')) return;
       if (processedContainers.has(element)) return;
 
-      // Check if this element is in a chat context OR on Explore page
+      // Check if this element is in a chat context, Explore page, or home page feed
       const chatContext = element.closest(
         '[role="main"], [class*="message"], [class*="bubble"], [class*="thread"], [class*="chat"], [class*="DirectMessage"]'
       );
 
-      // Allow processing if in chat OR on Explore page
-      if (!chatContext && !isExplorePage) return;
+      // Check if element is in main feed (article elements on home page)
+      const isInFeed =
+        element.closest('article, section[role="feed"]') && isHomePageFeed;
+
+      // Allow processing if in chat, Explore page, or home page feed
+      if (!chatContext && !isExplorePage && !isInFeed) return;
 
       // Check if element is a reel or contains reel content
       if (!isReelElement(element)) {
@@ -400,9 +436,16 @@
 
       // If element itself isn't a reel but contains reel content, try to find a better container
       if (!isReelElement(element)) {
-        const betterContainer = element.closest(
-          'div[class*="message"], div[class*="bubble"], div[class*="media"], article, section, a'
-        );
+        // Prioritize article elements for home page feed
+        let betterContainer = null;
+        if (isHomePageFeed) {
+          betterContainer = element.closest("article");
+        }
+        if (!betterContainer) {
+          betterContainer = element.closest(
+            'div[class*="message"], div[class*="bubble"], div[class*="media"], article, section, a'
+          );
+        }
         if (
           betterContainer &&
           betterContainer !== element &&
@@ -427,23 +470,39 @@
         reelContainer.dataset.originalContent = reelContainer.innerHTML;
       }
 
-      // Create and insert blocked card
-      const blockedCardElement = createBlockedCard();
-      reelContainer.innerHTML = "";
-      reelContainer.appendChild(blockedCardElement);
+      // On home page, just hide the content (no blocked card)
+      // On other pages (chat, explore), show blocked card
+      if (isHomePageFeed) {
+        reelContainer.innerHTML = "";
+        reelContainer.style.cssText = `
+          width: 100%;
+          min-height: 120px;
+          background: transparent;
+          pointer-events: none;
+        `;
+      } else {
+        // Create and insert blocked card
+        const blockedCardElement = createBlockedCard();
+        reelContainer.innerHTML = "";
+        reelContainer.appendChild(blockedCardElement);
+      }
       reelContainer.setAttribute("data-reel-blocked", "true");
     });
 
-    // Also look for video elements in chat or Explore page (reels often have video tags)
+    // Also look for video elements in chat, Explore page, or home page feed (reels often have video tags)
     const videos = document.querySelectorAll("video");
     videos.forEach((video) => {
-      // Check if video is in a chat context or on Explore page
+      // Check if video is in a chat context, Explore page, or home page feed
       const chatContext = video.closest(
         '[role="main"], [class*="message"], [class*="bubble"], [class*="thread"], [class*="chat"], [class*="DirectMessage"]'
       );
 
-      // Allow processing if in chat OR on Explore page
-      if (!chatContext && !isExplorePage) return;
+      // Check if video is in main feed article (home page)
+      const isInFeed =
+        video.closest('article, section[role="feed"]') && isHomePageFeed;
+
+      // Allow processing if in chat, Explore page, or home page feed
+      if (!chatContext && !isExplorePage && !isInFeed) return;
 
       // Skip if already blocked
       if (video.closest('[data-reel-blocked="true"]')) return;
@@ -474,10 +533,22 @@
           reelContainer.dataset.originalContent = reelContainer.innerHTML;
         }
 
-        // Create and insert blocked card
-        const blockedCardElement = createBlockedCard();
-        reelContainer.innerHTML = "";
-        reelContainer.appendChild(blockedCardElement);
+        // On home page, just hide the content (no blocked card)
+        // On other pages (chat, explore), show blocked card
+        if (isHomePageFeed) {
+          reelContainer.innerHTML = "";
+          reelContainer.style.cssText = `
+            width: 100%;
+            min-height: 120px;
+            background: transparent;
+            pointer-events: none;
+          `;
+        } else {
+          // Create and insert blocked card in the specific reel content area
+          const blockedCardElement = createBlockedCard();
+          reelContainer.innerHTML = "";
+          reelContainer.appendChild(blockedCardElement);
+        }
         reelContainer.setAttribute("data-reel-blocked", "true");
       }
     });
@@ -485,13 +556,17 @@
     // Look for images with play buttons (common reel thumbnail pattern)
     const images = document.querySelectorAll("img");
     images.forEach((img) => {
-      // Check if image is in a chat context or on Explore page
+      // Check if image is in a chat context, Explore page, or home page feed
       const chatContext = img.closest(
         '[role="main"], [class*="message"], [class*="bubble"], [class*="thread"], [class*="chat"], [class*="DirectMessage"]'
       );
 
-      // Allow processing if in chat OR on Explore page
-      if (!chatContext && !isExplorePage) return;
+      // Check if image is in main feed (home page)
+      const isInFeed =
+        img.closest('article, section[role="feed"]') && isHomePageFeed;
+
+      // Allow processing if in chat, Explore page, or home page feed
+      if (!chatContext && !isExplorePage && !isInFeed) return;
 
       // Skip if already blocked
       if (img.closest('[data-reel-blocked="true"]')) return;
@@ -536,10 +611,22 @@
           reelContainer.dataset.originalContent = reelContainer.innerHTML;
         }
 
-        // Create and insert blocked card
-        const blockedCardElement = createBlockedCard();
-        reelContainer.innerHTML = "";
-        reelContainer.appendChild(blockedCardElement);
+        // On home page, just hide the content (no blocked card)
+        // On other pages (chat, explore), show blocked card
+        if (isHomePageFeed) {
+          reelContainer.innerHTML = "";
+          reelContainer.style.cssText = `
+            width: 100%;
+            min-height: 120px;
+            background: transparent;
+            pointer-events: none;
+          `;
+        } else {
+          // Create and insert blocked card in the specific reel content area
+          const blockedCardElement = createBlockedCard();
+          reelContainer.innerHTML = "";
+          reelContainer.appendChild(blockedCardElement);
+        }
         reelContainer.setAttribute("data-reel-blocked", "true");
       }
     });
@@ -547,13 +634,17 @@
     // Additional check: Look for any div/container that has both an image and play button (very common reel pattern)
     const containers = document.querySelectorAll("div, article, section");
     containers.forEach((container) => {
-      // Check if container is in a chat context or on Explore page
+      // Check if container is in a chat context, Explore page, or home page feed
       const chatContext = container.closest(
         '[role="main"], [class*="message"], [class*="bubble"], [class*="thread"], [class*="chat"], [class*="DirectMessage"]'
       );
 
-      // Allow processing if in chat OR on Explore page
-      if (!chatContext && !isExplorePage) return;
+      // Check if container is in main feed (home page)
+      const isInFeed =
+        container.closest('article, section[role="feed"]') && isHomePageFeed;
+
+      // Allow processing if in chat, Explore page, or home page feed
+      if (!chatContext && !isExplorePage && !isInFeed) return;
 
       // Skip if already blocked or processed
       if (
@@ -588,10 +679,22 @@
           container.dataset.originalContent = container.innerHTML;
         }
 
-        // Create and insert blocked card
-        const blockedCardElement = createBlockedCard();
-        container.innerHTML = "";
-        container.appendChild(blockedCardElement);
+        // On home page, just hide the content (no blocked card)
+        // On other pages (chat, explore), show blocked card
+        if (isHomePageFeed) {
+          container.innerHTML = "";
+          container.style.cssText = `
+            width: 100%;
+            min-height: 120px;
+            background: transparent;
+            pointer-events: none;
+          `;
+        } else {
+          // Create and insert blocked card in the specific reel content area
+          const blockedCardElement = createBlockedCard();
+          container.innerHTML = "";
+          container.appendChild(blockedCardElement);
+        }
         container.setAttribute("data-reel-blocked", "true");
       }
     });
@@ -659,21 +762,53 @@
           container.dataset.originalContent = container.innerHTML;
         }
 
-        // Create and insert blocked card
-        const blockedCardElement = createBlockedCard();
-        container.innerHTML = "";
-        container.appendChild(blockedCardElement);
+        // On home page, just hide the content (no blocked card)
+        // On other pages, show blocked card
+        if (isHomePage()) {
+          container.innerHTML = "";
+          container.style.cssText = `
+            width: 100%;
+            min-height: 120px;
+            background: transparent;
+            pointer-events: none;
+          `;
+        } else {
+          // Create and insert blocked card in the specific reel content area
+          const blockedCardElement = createBlockedCard();
+          container.innerHTML = "";
+          container.appendChild(blockedCardElement);
+        }
         container.setAttribute("data-reel-blocked", "true");
       }
     });
   }
 
-  // Function to check and redirect if on reels
-  function checkAndRedirect() {
+  // Function to check and block if on reels page (show blank page instead of redirecting)
+  // Only blanks the page if we're actually on a reel page, not on home page with reels content
+  function checkAndBlockReelsPage() {
     if (!isBlockingEnabled || isRedirecting) return;
+
+    // Don't blank if body is not ready
+    if (!document.body || document.body.children.length === 0) {
+      return false;
+    }
 
     const currentUrl = window.location.href;
     const pathname = window.location.pathname;
+
+    // First, check if we're on home page - if so, NEVER blank the page
+    // Use the same robust home page detection as isHomePage() function
+    const isHomePageCheck = isHomePage();
+    if (isHomePageCheck) {
+      // Never blank the home page - just return
+      return false;
+    }
+
+    // Only blank the page if we're on a specific reel page, not on home page
+    // Double-check we're not on home page before blanking
+    if (isHomePage()) {
+      return false;
+    }
 
     // Check if we're on a reels page
     if (
@@ -682,9 +817,24 @@
       pathname.startsWith("/reel/") ||
       pathname.startsWith("/reels/")
     ) {
+      // Final safety check - make absolutely sure we're not on home page
+      if (isHomePage()) {
+        return false;
+      }
+
       isRedirecting = true;
-      // Use replace to avoid adding to history
-      window.location.replace("https://www.instagram.com");
+      // Make the page blank instead of redirecting
+      document.body.innerHTML = "";
+      document.body.style.cssText = `
+        margin: 0;
+        padding: 0;
+        background: #000;
+        width: 100%;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      `;
       return true;
     }
 
@@ -704,8 +854,24 @@
           mainVideo.closest('[class*="reel"]');
 
         if (isMainReel) {
+          // Final safety check - make absolutely sure we're not on home page
+          if (isHomePage()) {
+            return false;
+          }
+
           isRedirecting = true;
-          window.location.replace("https://www.instagram.com");
+          // Make the page blank instead of redirecting
+          document.body.innerHTML = "";
+          document.body.style.cssText = `
+              margin: 0;
+              padding: 0;
+              background: #000;
+              width: 100%;
+              height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            `;
           return true;
         }
       }
@@ -714,9 +880,11 @@
     return false;
   }
 
-  // Immediate check
-  checkAndRedirect();
-  blockPlayingReels();
+  // Delayed check to ensure page structure is loaded
+  setTimeout(() => {
+    checkAndBlockReelsPage();
+    blockPlayingReels();
+  }, 100);
 
   // Listen for video play events to catch reels as they start playing
   document.addEventListener(
@@ -753,7 +921,7 @@
   history.pushState = function (...args) {
     originalPushState.apply(history, args);
     setTimeout(() => {
-      if (checkAndRedirect()) return;
+      if (checkAndBlockReelsPage()) return;
       isRedirecting = false;
     }, 10);
   };
@@ -761,7 +929,7 @@
   history.replaceState = function (...args) {
     originalReplaceState.apply(history, args);
     setTimeout(() => {
-      if (checkAndRedirect()) return;
+      if (checkAndBlockReelsPage()) return;
       isRedirecting = false;
     }, 10);
   };
@@ -769,7 +937,7 @@
   // Listen for popstate (back/forward button)
   window.addEventListener("popstate", () => {
     setTimeout(() => {
-      checkAndRedirect();
+      checkAndBlockReelsPage();
       isRedirecting = false;
     }, 10);
   });
@@ -780,7 +948,7 @@
     const currentUrl = location.href;
     if (currentUrl !== lastUrl) {
       lastUrl = currentUrl;
-      if (checkAndRedirect()) {
+      if (checkAndBlockReelsPage()) {
         return;
       }
       isRedirecting = false;
@@ -826,8 +994,95 @@
     }
   }
 
+  // Helper function to check if we're on home page
+  function isHomePage() {
+    try {
+      const currentUrl = window.location.href;
+      const pathname = window.location.pathname;
+
+      // First check: if URL contains reel/reels, definitely not home page
+      if (currentUrl.includes("/reel/") || currentUrl.includes("/reels/")) {
+        return false;
+      }
+
+      // Second check: pathname must be home-like
+      const isHomePath =
+        pathname === "/" ||
+        pathname === "" ||
+        pathname === "/?" ||
+        pathname.startsWith("/?");
+
+      if (!isHomePath) {
+        return false;
+      }
+
+      // Third check: URL must be home page URL
+      const isHomeUrl =
+        currentUrl === "https://www.instagram.com/" ||
+        currentUrl === "https://www.instagram.com" ||
+        currentUrl.startsWith("https://www.instagram.com/?") ||
+        currentUrl.startsWith("https://www.instagram.com#") ||
+        (currentUrl.includes("instagram.com") &&
+          !currentUrl.includes("/reel/") &&
+          !currentUrl.includes("/reels/") &&
+          (pathname === "/" || pathname === ""));
+
+      if (!isHomeUrl) {
+        return false;
+      }
+
+      // Fourth check: look for feed structure (but don't require it - sometimes it loads late)
+      // If we have the URL and pathname checks, that's enough
+      return true;
+    } catch (e) {
+      // If there's any error, default to false (not home page) to be safe
+      return false;
+    }
+  }
+
+  // Helper function to check if we're on followers/following pages
+  function isFollowersFollowingPage() {
+    try {
+      const currentUrl = window.location.href;
+      const pathname = window.location.pathname;
+
+      // Check if URL or pathname indicates followers/following page
+      return (
+        pathname.includes("/followers/") ||
+        pathname.includes("/following/") ||
+        currentUrl.includes("/followers/") ||
+        currentUrl.includes("/following/") ||
+        pathname.match(/\/[^\/]+\/(followers|following)\/?$/)
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Function to show blocked content alert modal
   function showBlockedContentAlert() {
+    // Don't show popup on home page - only show inline blocked cards
+    // Double check to be absolutely sure
+    if (isHomePage()) {
+      return;
+    }
+
+    // Don't show popup on followers/following pages
+    if (isFollowersFollowingPage()) {
+      return;
+    }
+
+    // Additional safety check - verify we're not on home page by checking URL again
+    const currentUrl = window.location.href;
+    const pathname = window.location.pathname;
+    if (
+      (pathname === "/" || pathname === "" || pathname === "/?") &&
+      !currentUrl.includes("/reel/") &&
+      !currentUrl.includes("/reels/")
+    ) {
+      return;
+    }
+
     // Check if alert already exists
     if (document.getElementById("reel-blocked-alert")) return;
 
@@ -934,9 +1189,9 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     `;
 
-    // Create anchor tag wrapper for close button
+    // Create anchor tag for close button
     const closeLink = document.createElement("a");
-    closeLink.href = "https://www.instagram.com";
+    closeLink.href = "#";
     closeLink.textContent = "Got it";
     closeLink.style.cssText = `
       display: block;
@@ -969,7 +1224,11 @@
     });
 
     closeLink.addEventListener("click", (e) => {
-      // Close the reel modal first (if exists) before navigation
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      // Close the reel modal first (if exists)
       if (pendingReelModalToClose) {
         const modal = pendingReelModalToClose;
 
@@ -1023,10 +1282,14 @@
       // Animate out the alert
       overlay.style.animation = "fadeOut 0.3s ease";
 
-      // Remove overlay after animation (navigation will happen via href)
+      // Remove overlay after animation
       setTimeout(() => {
-        overlay.remove();
-        style.remove();
+        if (overlay && overlay.parentElement) {
+          overlay.remove();
+        }
+        if (style && style.parentElement) {
+          style.remove();
+        }
       }, 300);
     });
 
@@ -1037,6 +1300,11 @@
     modal.appendChild(closeLink);
     overlay.appendChild(modal);
 
+    // Prevent modal clicks from closing the overlay
+    modal.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
+
     // Close on overlay click
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) {
@@ -1044,7 +1312,7 @@
       }
     });
 
-    // Auto-close after 5 seconds (will navigate via href)
+    // Auto-close after 5 seconds
     setTimeout(() => {
       if (document.getElementById("reel-blocked-alert")) {
         closeLink.click();
@@ -1084,6 +1352,12 @@
   function detectAndCloseReelsModal() {
     if (!isBlockingEnabled) return;
 
+    // Don't show popup on home page
+    if (isHomePage()) return;
+
+    // Don't show popup on followers/following pages
+    if (isFollowersFollowingPage()) return;
+
     let reelDetected = false;
 
     // Common selectors for Instagram modals/overlays that contain reels
@@ -1103,23 +1377,32 @@
       const modals = document.querySelectorAll(selector);
       modals.forEach((modal) => {
         // Check if this modal contains reel-related content
+        // Be more specific - only check for actual reel links/videos, not text content
+        // (text content can contain "reel" in words like "following")
         const hasReelContent =
           modal.querySelector('video[src*="reel"]') ||
           modal.querySelector('a[href*="/reel/"]') ||
           modal.querySelector('a[href*="/reels/"]') ||
-          modal.textContent?.toLowerCase().includes("reel") ||
-          modal.getAttribute("aria-label")?.toLowerCase().includes("reel") ||
+          // Only check aria-label if it specifically mentions "Reel" or "Reels" (capitalized, indicating it's about reels)
+          (modal.getAttribute("aria-label")?.includes("Reel") &&
+            !modal
+              .getAttribute("aria-label")
+              ?.toLowerCase()
+              .includes("following")) ||
           modal.querySelector('[aria-label*="Reel"]') ||
-          modal.querySelector('[aria-label*="reel"]');
+          modal.querySelector('[aria-label*="Reels"]');
 
         if (hasReelContent) {
           reelDetected = true;
 
-          // Store reference to modal to close after alert is dismissed
-          pendingReelModalToClose = modal;
+          // Don't show popup on home page
+          if (!isHomePage()) {
+            // Store reference to modal to close after alert is dismissed
+            pendingReelModalToClose = modal;
 
-          // Show blocked content alert - it will close the modal when dismissed
-          showBlockedContentAlert();
+            // Show blocked content alert - it will close the modal when dismissed
+            showBlockedContentAlert();
+          }
         }
       });
     });
@@ -1146,11 +1429,14 @@
           video.pause();
           video.currentTime = 0;
 
-          // Store reference to modal to close after alert is dismissed
-          pendingReelModalToClose = parentModal;
+          // Don't show popup on home page
+          if (!isHomePage()) {
+            // Store reference to modal to close after alert is dismissed
+            pendingReelModalToClose = parentModal;
 
-          // Show blocked content alert - it will close the modal when dismissed
-          showBlockedContentAlert();
+            // Show blocked content alert - it will close the modal when dismissed
+            showBlockedContentAlert();
+          }
         }
       }
     });
@@ -1166,11 +1452,16 @@
     }
   }, 1000);
 
-  // Intercept all clicks - more aggressive approach
+  // Intercept all clicks - block reels on click
   document.addEventListener(
     "click",
     (e) => {
       if (!isBlockingEnabled) return;
+
+      // Don't block reels on home page - allow them to work normally
+      if (isHomePage()) {
+        return;
+      }
 
       // Skip if clicking on a blocked card
       if (e.target.closest('[data-reel-blocked="true"], .reel-blocked-card')) {
@@ -1189,18 +1480,13 @@
           e.stopPropagation();
           e.stopImmediatePropagation();
 
-          // Check if it's from chat
-          const chatContext = element.closest(
-            '[role="main"], [class*="chat"], [class*="message"], [class*="thread"]'
-          );
-          if (chatContext) {
-            // Show alert for chat reels
+          // Only show popup if not on home page
+          if (!isHomePage()) {
             showBlockedContentAlert();
           }
 
           // Also check for modals that might have opened
           setTimeout(() => detectAndCloseReelsModal(), 50);
-          window.location.replace("https://www.instagram.com");
           return false;
         }
 
@@ -1216,17 +1502,12 @@
               e.stopPropagation();
               e.stopImmediatePropagation();
 
-              // Check if it's from chat
-              const chatContext = element.closest(
-                '[role="main"], [class*="chat"], [class*="message"], [class*="thread"]'
-              );
-              if (chatContext) {
-                // Show alert for chat reels
+              // Only show popup if not on home page
+              if (!isHomePage()) {
                 showBlockedContentAlert();
               }
 
               setTimeout(() => detectAndCloseReelsModal(), 50);
-              window.location.replace("https://www.instagram.com");
               return false;
             }
           }
@@ -1245,8 +1526,13 @@
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
+
+          // Only show popup if not on home page
+          if (!isHomePage()) {
+            showBlockedContentAlert();
+          }
+
           setTimeout(() => detectAndCloseReelsModal(), 50);
-          window.location.replace("https://www.instagram.com");
           return false;
         }
 
@@ -1266,8 +1552,10 @@
             e.stopPropagation();
             e.stopImmediatePropagation();
 
-            // Show alert for chat reels
-            showBlockedContentAlert();
+            // Only show popup if not on home page
+            if (!isHomePage()) {
+              showBlockedContentAlert();
+            }
 
             setTimeout(() => detectAndCloseReelsModal(), 50);
             return false;
@@ -1283,11 +1571,14 @@
   // Monitor for route changes in Instagram's router
   const routeObserver = new MutationObserver(() => {
     setTimeout(() => {
-      checkAndRedirect();
+      checkAndBlockReelsPage();
       isRedirecting = false;
       updateReelsButtonVisibility();
       addReelsBlockedCardsInChat();
-      detectAndCloseReelsModal();
+      // Only detect modals if not on home page
+      if (!isHomePage()) {
+        detectAndCloseReelsModal();
+      }
       blockPlayingReels();
     }, 50);
   });
@@ -1295,6 +1586,9 @@
   // Dedicated observer for modal detection (more aggressive)
   const modalObserver = new MutationObserver((mutations) => {
     if (!isBlockingEnabled) return;
+
+    // Don't detect modals on home page
+    if (isHomePage()) return;
 
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
@@ -1309,7 +1603,9 @@
           if (isModal) {
             // Immediately check and close if it's a reel modal
             setTimeout(() => {
-              detectAndCloseReelsModal();
+              if (!isHomePage()) {
+                detectAndCloseReelsModal();
+              }
               addReelsBlockedCardsInChat();
               blockPlayingReels();
             }, 10);
@@ -1318,7 +1614,9 @@
           // Check for video elements being added
           if (node.matches?.("video") || node.querySelector?.("video")) {
             setTimeout(() => {
-              detectAndCloseReelsModal();
+              if (!isHomePage()) {
+                detectAndCloseReelsModal();
+              }
               addReelsBlockedCardsInChat();
               blockPlayingReels();
             }, 10);
